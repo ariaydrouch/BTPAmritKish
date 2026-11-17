@@ -3,35 +3,26 @@
 Hilbert series of d N x N matrices under simultaneous conjugation
 (Molien-Weyl integral, evaluated by iterated residues).
 
-Data model (see the accompanying document for the full explanation)
--------------------------------------------------------------------
 Variables are indexed 0 .. L-1 with L = (N-1) + d:
-    indices 0 .. N-2      -> torus variables t_1 .. t_{N-1}
+    indices 0 .. N-2      -> variables t_1 .. t_{N-1}
     indices N-1 .. L-1    -> weights x_1 .. x_d
 A monomial is an integer exponent tuple of length L.
 
 A TERM is   coef * x^mono * prod_i (1 - x^key_i) ^ e_i
-    coef : python int
-    mono : exponent tuple (the "prefactor")
-    facs : dict  canonical key -> signed exponent  (e_i < 0: denominator)
 
 The integrand is a FLAT LIST of terms, stored as a dict
     (mono, sorted facs tuple) -> coef
 so that equal terms merge automatically.
 
-Versions (selected with hilbert_series(..., equal_x=..., workers=...))
------------------------------------------------------------------------
-* general   : d independent weights x_1..x_d (L = N-1+d variables).
-* equal_x   : all x_i set equal to one variable x from the start.  There is a
+Two versions - 
+ general   : d independent weights x_1..x_d (L = N-1+d variables).
+ equal_x   : all x_i set equal to one variable x from the start.  There is a
               single weight variable (L = N), and every x-dependent factor of the
               integrand carries multiplicity d, so poles have higher order and the
               series method of `residues` is used.
-* workers>1 : the terms of the list are independent, so each iterated residue
-              (and the numerator sum of the final assembly) is farmed out to a
-              process pool.  Processes, not threads: the work is pure Python,
-              so threads would be serialized by the GIL.
 
-Canonical key: the exponent tuple m of a binomial (1 - x^m) is normalised so
+
+The exponent tuple m of a binomial (1 - x^m) is normalised so
 its first nonzero entry is positive, using  1 - x^(-m) = -x^(-m) (1 - x^m).
 Because the t's come first and are integrated in order, every binomial that
 contains the current variable t_j has exponent exactly +1 on t_j.
@@ -45,9 +36,8 @@ from sympy.polys.rings import ring
 from sympy.polys.domains import ZZ
 
 
-# ---------------------------------------------------------------------------
 # Section 1: small vector helpers and the generalised binomial coefficient
-# ---------------------------------------------------------------------------
+
 def vadd(a, b):
     return tuple(u + v for u, v in zip(a, b))
 
@@ -73,9 +63,9 @@ def gen_binom(e, q):
     return c
 
 
-# ---------------------------------------------------------------------------
+
 # Section 2: canonical binomials and term construction
-# ---------------------------------------------------------------------------
+
 def canon(m):
     """Return (flipped, key) for the binomial (1 - x^m).
     flipped is None if m == 0 (the binomial is 1 - 1 = 0)."""
@@ -137,9 +127,8 @@ def initial_state(N, nx, mult=1):
     return {freeze(mono, facs): coef}
 
 
-# ---------------------------------------------------------------------------
 # Section 3: pole identification
-# ---------------------------------------------------------------------------
+
 def first_primes(d):
     ps, n = [], 2
     while len(ps) < d:
@@ -150,9 +139,7 @@ def first_primes(d):
 
 
 class PoleClassifier:
-    """Exact inside/outside test.
-
-    We evaluate at x_i = 1/q_i (distinct primes).  The pole of (1 - t*r) is
+    """ We evaluate at x_i = 1/q_i (distinct primes).  The pole of (1 - t*r) is
     t = r^-1.  Its modulus depends on the later t's, which sit on circles of
     radius exp(-eta_s) with eta_1 >> eta_2 >> ... > 0 (all infinitesimal), and on
     the x-part of r:
@@ -205,9 +192,8 @@ def find_poles(mono, facs, j, classify):
     return poles
 
 
-# ---------------------------------------------------------------------------
 # Section 4: residue calculation
-# ---------------------------------------------------------------------------
+
 def prefactor_slot(k, p, n):
     """Series of t^k around t = p, in s = t - p:  sum_q binom(k,q) p^(k-q) s^q."""
     cap = n if k < 0 else min(n, k)
@@ -329,13 +315,12 @@ def _integrate_items(items, j, L, classify):
 
 
 def _integrate_task(args):
-    """Process-pool entry point (must be a module-level function)."""
     items, j, L, nt, nx = args
     return _integrate_items(items, j, L, PoleClassifier(nt, nx))
 
 
-MIN_PARALLEL_TERMS = 16      # below this the pool overhead is not worth paying
-CHUNKS_PER_WORKER = 16       # small chunks: load balance and bounded per-worker memory
+MIN_PARALLEL_TERMS = 16     
+CHUNKS_PER_WORKER = 16       
 
 
 def integrate_variable(state, j, L, nt, nx, pool=None, workers=1):
@@ -366,11 +351,11 @@ def integrate_variable(state, j, L, nt, nx, pool=None, workers=1):
     return new_state
 
 
-# ---------------------------------------------------------------------------
+
 # Section 5: final assembly (x-only terms -> one rational function)
-# ---------------------------------------------------------------------------
+
 def exact_div(f, g):
-    """Exact division of polynomials given as {exponent tuple: int} dicts (lex order).
+    """ Exact division of polynomials given as {exponent tuple: int} dicts (lex order).
     Returns the quotient dict, or None if g does not divide f.
     Heap-based long division: O(|q| |g| log |f|), much faster than repeatedly
     searching for the leading term."""
@@ -541,9 +526,9 @@ def assemble(state, N, nx, mult, xs, nt, pool=None, workers=1):
     return mono_expr, numer, denom
 
 
-# ---------------------------------------------------------------------------
+
 # Section 6: driver
-# ---------------------------------------------------------------------------
+
 def hilbert_series(N, d, equal_x=False, workers=1, verbose=False):
     """Hilbert series of d N x N matrices under simultaneous conjugation.
 
@@ -588,22 +573,20 @@ def hilbert_series(N, d, equal_x=False, workers=1, verbose=False):
     return Z, sp.factor(sp.cancel(Z.subs({xi: x for xi in xs})))
 
 
-# ---------------------------------------------------------------------------
+
 # Section 7: Hironaka form of the singly graded series
-# ---------------------------------------------------------------------------
+
 # Z(x) = P(x) / prod_i (1 - x^{d_i})^{m_i}, with sum m_i = Krull dimension.
-# The ring of invariants is Cohen-Macaulay (Hochster-Roberts), so for the degrees
-# of an actual system of primary invariants P has non-negative coefficients and
+# For an actual system of primary invariants P has non-negative coefficients and
 # P(1) is the number of secondary invariants (including the trivial one, 1).
-#
 # P(1) is NOT an invariant of the ring: with e = lim_{x->1} (1-x)^D Z(x),
-#     P(1) = e * prod_i d_i^{m_i},
+# P(1) = e * prod_i d_i^{m_i},
 # so a different (equally valid) choice of primary degrees changes the count.
-#
 # Polynomials below are dense coefficient lists, lowest degree first.
 
 def _poly_mul_binomial(p, k):
     """p(x) * (1 - x^k)."""
+    
     out = p + [0] * k
     for i, c in enumerate(p):
         out[i + k] -= c
@@ -612,6 +595,7 @@ def _poly_mul_binomial(p, k):
 
 def _poly_exact_div(p, q):
     """p / q for integer polynomials, q with leading coefficient +-1; error if inexact."""
+    
     p = list(p)
     dq = len(q) - 1
     lc = q[-1]
@@ -636,13 +620,12 @@ def _coeffs(expr, x):
 
 
 def cyclotomic_exponents(den, x):
-    """{k: a_k} with den = +- prod_k Phi_k(x)^{a_k}."""
     _, flist = sp.factor_list(den, x)
     a = {}
     for f, m in flist:
         fp = sp.Poly(f, x)
         deg = fp.degree()
-        for k in range(1, 2 * deg * deg + 3):            # phi(k) >= sqrt(k/2)
+        for k in range(1, 2 * deg * deg + 3):            
             if sp.totient(k) != deg:
                 continue
             ck = sp.Poly(sp.cyclotomic_poly(k, x), x)
@@ -913,7 +896,6 @@ def _print_hironaka(hf):
 
 
 def _parse_degrees(s):
-    """'1:2,2:3,3:4' -> {1: 2, 2: 3, 3: 4}"""
     return {int(k): int(m) for k, m in (item.split(":") for item in s.split(","))}
 
 
